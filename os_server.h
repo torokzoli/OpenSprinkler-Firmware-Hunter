@@ -21,17 +21,12 @@
  * <http://www.gnu.org/licenses/>. 
  */
  
- #ifndef _OPENSPRINKLER_SERVER_H
- #define _OPENSPRINKLER_SERVER_H
+ #ifndef _SERVER_H
+ #define _SERVER_H
  
  #if !defined(ARDUINO)
  #include <stdarg.h>
- #else 
- #include <Arduino.h>
  #endif
- #include <utils.h>
- 
- char dec2hexchar(byte dec);
  
  class BufferFiller {
 	 char *start; //!< Pointer to start of buffer
@@ -64,12 +59,6 @@
 			 case 'S':
 				 strcpy((char*) ptr, va_arg(ap, const char*));
 				 break;
-			 case 'X': {
-				 char d = va_arg(ap, int);
-				 *ptr++ = dec2hexchar((d >> 4) & 0x0F);
-				 *ptr++ = dec2hexchar(d & 0x0F);
-			 }
-				 continue;
 			 case 'F': {
 				 PGM_P s = va_arg(ap, PGM_P);
 				 char d;

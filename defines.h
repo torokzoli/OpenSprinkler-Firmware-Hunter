@@ -374,6 +374,7 @@ enum {
 	#define V2_PIN_BUTTON_1      15 // button 1 disabled
 	#define V2_PIN_BUTTON_2      255 // button 2 disabled
 	#define V2_PIN_BUTTON_3      255 // button 3 disabled
+	#define V2_PIN_RFTX          255 // RF transmitter pin disabled
 	#define V2_PIN_BOOST         IOEXP_PIN+13
 	#define V2_PIN_BOOST_EN      IOEXP_PIN+14
 	#define V2_PIN_LATCH_COM     IOEXP_PIN+15
