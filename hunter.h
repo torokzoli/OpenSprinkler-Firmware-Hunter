@@ -13,7 +13,7 @@ using namespace std;
 #define SHORT_INTERVAL  208
 #define LONG_INTERVAL 1875
 
-#define HUNTER_PIN  16 // XXX D0
+#define HUNTER_PIN  2 // XXX D4
 
 void HunterStop(uint8_t zone);
 void HunterStart(uint8_t zone, uint8_t time);
