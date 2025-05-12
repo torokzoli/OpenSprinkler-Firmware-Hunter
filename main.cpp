@@ -31,6 +31,7 @@
 #include "mqtt.h"
 #include "main.h"
 #include "notifier.h"
+#include "hunter.h"
 
 #if defined(ARDUINO)
 #include <Arduino.h>
@@ -67,16 +68,21 @@
 	#endif
 #endif
 
+void reset_all_stations();
+void reset_all_stations_immediate();
+void push_message(uint8_t type, uint32_t lval=0, float fval=0.f);
 void manual_start_program(unsigned char, unsigned char);
+void remote_http_callback(char*);
 
 // Small variations have been added to the timing values below
 // to minimize conflicting events
-#define NTP_SYNC_INTERVAL       86413L  // NTP sync interval (in seconds)
-#define CHECK_NETWORK_INTERVAL  601     // Network checking timeout (in seconds)
-#define CHECK_WEATHER_TIMEOUT   21613L  // Weather check interval (in seconds)
-#define CHECK_WEATHER_SUCCESS_TIMEOUT 86400L // Weather check success interval (in seconds)
-#define LCD_BACKLIGHT_TIMEOUT     15    // LCD backlight timeout (in seconds))
-#define PING_TIMEOUT              200   // Ping test timeout (in ms)
+#define NTP_SYNC_INTERVAL				1440L 	// NYP sync interval, every 30 mins, expressed in seconds
+#define RTC_SYNC_INTERVAL				3607		// RTC sync interval, 3600 secs
+#define CHECK_NETWORK_INTERVAL	601			// Network checking timeout, 10 minutes
+#define CHECK_WEATHER_TIMEOUT		7207L		// Weather check interval: 2 hours
+#define CHECK_WEATHER_SUCCESS_TIMEOUT 86400L // Weather check success interval: 24 hrs
+#define LCD_BACKLIGHT_TIMEOUT		15			// LCD backlight timeout: 15 secs
+#define PING_TIMEOUT						200			// Ping test timeout: 200 ms
 #define UI_STATE_MACHINE_INTERVAL 50    // how often does ui_state_machine run (in ms)
 #define CLIENT_READ_TIMEOUT       5     // client read timeout (in seconds)
 #define DHCP_CHECKLEASE_INTERVAL  3600L // DHCP check lease interval (in seconds)
@@ -176,7 +182,7 @@ void ui_state_machine() {
 	// read button, if something is pressed, wait till release
 	unsigned char button = os.button_read(BUTTON_WAIT_HOLD);
 
-	if (button & BUTTON_FLAG_DOWN) {  // repond only to button down events
+	if (button & BUTTON_FLAG_DOWN) {  // respond only to button down events
 		os.button_timeout = LCD_BACKLIGHT_TIMEOUT;
 		os.lcd_set_brightness(1);
 	} else {
@@ -465,6 +471,10 @@ void do_setup() {
 
 #endif
 
+void write_log(unsigned char type, ulong curr_time);
+void schedule_all_stations(ulong curr_time);
+void turn_off_station(unsigned char sid, ulong curr_time);
+void process_dynamic_events(ulong curr_time);
 void turn_on_station(unsigned char sid, ulong duration);
 static void check_network();
 void check_weather();
@@ -740,8 +750,27 @@ void do_loop()
 				notif.add(NOTIFY_SENSOR2, LOGDATA_SENSOR2, 0);
 			}
 		}
-		os.old_status.sensor2_active = os.status.sensor2_active;
+		os.old_status.sensor2_active = os.status.sensor2_active;			
 
+    // ====== Check hunter_p sensor status ====== 3B
+    if (os.read_current() > 3000) {
+      os.status.hunter_p = 1;
+    } else {
+      os.status.hunter_p = 0;
+    }
+      if (os.old_status.hunter_p != os.status.hunter_p) {
+        if (curr_time>os.hunter_p_active_lasttime+5) {   // add a 5 second delay on status change
+          if (os.status.hunter_p) {
+            // hunter_p sensor on
+            os.hunter_p_active_lasttime = curr_time;
+          } else {
+            // hunter_p sensor off
+            os.hunter_p_active_lasttime = curr_time;
+            }
+        }
+        os.old_status.hunter_p = os.status.hunter_p;
+      }
+      
 		// ===== Check program switch status =====
 		unsigned char pswitch = os.detect_programswitch_status(curr_time);
 		if(pswitch > 0) {
@@ -887,6 +916,19 @@ void do_loop()
 							turn_off_station(sid, curr_time);
 						}
 					}
+					// if current station is not running, check if we should turn it on
+					if(!((bitvalue>>s)&1)) {
+						if (curr_time >= q->st && curr_time < q->st+q->dur) {
+
+							//turn_on_station(sid);
+							os.set_station_bit(sid, 1);
+              HunterStart(sid+1,round((q->dur/60)+0.5)); // Starts X-Core Hunter zone for 'dur' minutes +1
+
+							// RAH implementation of flow sensor
+							flow_start=0;
+
+						} //if curr_time > scheduled_start_time
+					} // if current station is not running
 				}//end_s
 			}//end_bid
 
@@ -1014,10 +1056,24 @@ void do_loop()
 
 #if defined(USE_DISPLAY)
 		// process LCD display
-		if (!ui_state) { os.lcd_print_screen(ui_anim_chars[(unsigned long)curr_time%3]); }
-#endif
-
-		// handle reboot request
+		if (!ui_state) {
+			os.lcd_print_station(1, ui_anim_chars[(unsigned long)curr_time%3]);
+			#if defined(ESP8266)
+			if(os.get_wifi_mode()==WIFI_MODE_STA && WiFi.status()==WL_CONNECTED && WiFi.localIP()) {
+				os.lcd.setCursor(0, 2);
+				os.lcd.clear(2, 2);
+				if(os.status.program_busy) {
+					//os.lcd.print(F("curr: "));
+          os.lcd.print(F("A0: ")); // 3B => show mV on A0 from hunter P pin
+					uint16_t curr = os.read_current();
+					os.lcd.print(curr);
+					//os.lcd.print(F(" mA"));
+          os.lcd.print(F(" mV")); // 3B => show mV on A0 from hunter P pin
+				}
+			}
+			#endif
+		}
+		
 		// check safe_reboot condition
 		if (os.status.safe_reboot && (curr_time > reboot_timer)) {
 			// if no program is running at the moment
@@ -1184,6 +1240,8 @@ void handle_shift_remaining_stations(RuntimeQueueStruct* q, unsigned char gid, t
  * the station should be removed from the queue
  */
 void turn_off_station(unsigned char sid, time_os_t curr_time, unsigned char shift) {
+	os.set_station_bit(sid, 0);
+  HunterStop(sid+1); // Stops X-Core Hunter zones
 
 	unsigned char qid = pd.station_qid[sid];
 	// ignore request if trying to turn off a zone that's not even in the queue
@@ -1358,6 +1416,8 @@ void schedule_all_stations(time_os_t curr_time) {
 		if(q->st) continue; // if this queue element has already been scheduled, skip
 		if(!q->dur) continue; // if the element has been marked to reset, skip
 		gid = os.get_station_gid(q->sid);
+		unsigned char bid=sid>>3;
+		unsigned char s=sid&0x07;
 
 		// use sequential scheduling per sequential group
 		// apply station delay time
@@ -1454,6 +1514,149 @@ void manual_start_program(unsigned char pid, unsigned char uwt) {
 	}
 }
 
+// ==========================================
+// ====== PUSH NOTIFICATION FUNCTIONS =======
+// ==========================================
+void ip2string(char* str, unsigned char ip[4]) {
+	for(unsigned char i=0;i<4;i++) {
+		itoa(ip[i], str+strlen(str), 10);
+		if(i!=3) strcat(str, ".");
+	}
+}
+
+void push_message(unsigned char type, uint32_t lval, float fval) {
+
+	static const char* host = DEFAULT_IFTTT_URL;
+	// prepare post message in tmp_buffer
+	char* postval = tmp_buffer;
+
+	// check if this type of event is enabled for push notification
+	if((os.iopts[IOPT_IFTTT_ENABLE]&type) == 0) return;
+
+	strcpy_P(postval, PSTR("{\"value1\":\""));
+
+	switch(type) {
+
+		case IFTTT_STATION_RUN:
+			
+			strcat_P(postval, PSTR("Station "));
+			os.get_station_name(lval, postval+strlen(postval));
+			strcat_P(postval, PSTR(" closed. It ran for "));
+			itoa((int)fval/60, postval+strlen(postval), 10);
+			strcat_P(postval, PSTR(" minutes "));
+			itoa((int)fval%60, postval+strlen(postval), 10);
+			strcat_P(postval, PSTR(" seconds."));
+			if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
+				strcat_P(postval, PSTR(" Flow rate: "));
+				#if defined(ARDUINO)
+				dtostrf(flow_last_gpm,5,2,postval+strlen(postval));
+				#else
+				sprintf(postval+strlen(postval), "%5.2f", flow_last_gpm);
+				#endif
+			}
+			break;
+
+		case IFTTT_PROGRAM_SCHED:
+
+			strcat_P(postval, PSTR("Scheduled Program "));
+			{
+				ProgramStruct prog;
+				pd.read(lval, &prog);
+				if(lval<pd.nprograms) strcat(postval, prog.name);
+				else strcat_P(postval, PSTR("Manual"));
+			}
+			strcat_P(postval, PSTR(" with "));
+			itoa((int)fval, postval+strlen(postval), 10);
+			strcat_P(postval, PSTR("% water level."));
+			break;
+
+		case IFTTT_SENSOR1:
+			
+			strcat_P(postval, PSTR("Sensor 1 "));
+			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
+			break;
+			
+		case IFTTT_SENSOR2:
+
+			strcat_P(postval, PSTR("Sensor 2 "));
+			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
+			break;
+
+		case IFTTT_RAINDELAY:
+
+			strcat_P(postval, PSTR("Rain delay "));
+			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
+			break;
+						
+		case IFTTT_FLOWSENSOR:
+			strcat_P(postval, PSTR("Flow count: "));
+			itoa(lval, postval+strlen(postval), 10);
+			strcat_P(postval, PSTR(", volume: "));
+			{
+			uint32_t volume = os.iopts[IOPT_PULSE_RATE_1];
+			volume = (volume<<8)+os.iopts[IOPT_PULSE_RATE_0];
+			volume = lval*volume;
+			itoa(volume/100, postval+strlen(postval), 10);
+			strcat(postval, ".");
+			itoa(volume%100, postval+strlen(postval), 10);
+			}
+			break;
+
+		case IFTTT_WEATHER_UPDATE:
+			if(lval>0) {
+				strcat_P(postval, PSTR("External IP updated: "));
+				unsigned char ip[4] = {(unsigned char)((lval>>24)&0xFF),
+											(unsigned char)((lval>>16)&0xFF),
+											(unsigned char)((lval>>8)&0xFF),
+											(unsigned char)(lval&0xFF)};
+				ip2string(postval, ip);
+			}
+			if(fval>=0) {
+				strcat_P(postval, PSTR("Water level updated: "));
+				itoa((int)fval, postval+strlen(postval), 10);
+				strcat_P(postval, PSTR("%."));
+			}
+				
+			break;
+
+		case IFTTT_REBOOT:
+			#if defined(ARDUINO)
+				strcat_P(postval, PSTR("Rebooted. Device IP: "));
+				#if defined(ESP8266)
+				{
+					IPAddress _ip;
+					if (m_server) {
+						_ip = Ethernet.localIP();
+					} else {
+						_ip = WiFi.localIP();
+					}
+					unsigned char ip[4] = {_ip[0], _ip[1], _ip[2], _ip[3]};
+					ip2string(postval, ip);
+				}
+				#else
+				ip2string(postval, &(Ethernet.localIP()[0]));
+				#endif
+				//strcat(postval, ":");
+				//itoa(_port, postval+strlen(postval), 10);
+			#else
+				strcat_P(postval, PSTR("Process restarted."));
+			#endif
+			break;
+	}
+
+	strcat_P(postval, PSTR("\"}"));
+
+	//char postBuffer[1500];
+	BufferFiller bf = ether_buffer;
+	bf.emit_p(PSTR("POST /trigger/sprinkler/with/key/$O HTTP/1.0\r\n"
+								 "Host: $S\r\n"
+								 "Accept: */*\r\n"
+								 "Content-Length: $D\r\n"
+								 "Content-Type: application/json\r\n\r\n$S"),
+								 SOPT_IFTTT_KEY, host, strlen(postval), postval);
+
+	os.send_http_request(host, 80, ether_buffer, remote_http_callback);
+}
 
 // ================================
 // ====== LOGGING FUNCTIONS =======

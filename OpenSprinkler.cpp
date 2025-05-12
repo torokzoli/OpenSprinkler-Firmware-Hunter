@@ -50,6 +50,7 @@ time_os_t OpenSprinkler::sensor2_off_timer;
 time_os_t OpenSprinkler::sensor2_active_lasttime;
 time_os_t OpenSprinkler::raindelay_on_lasttime;
 ulong  OpenSprinkler::pause_timer;
+ulong OpenSprinkler::hunter_p_active_lasttime; // 3B
 
 ulong   OpenSprinkler::flowcount_log_start;
 ulong   OpenSprinkler::flowcount_rt;
@@ -844,12 +845,17 @@ void OpenSprinkler::begin() {
 #if defined(ESP8266) // ESP8266 specific initializations
 
 	/* check hardware type */
-	if(detect_i2c(ACDR_I2CADDR)) hw_type = HW_TYPE_AC;
+	//if(detect_i2c(ACDR_I2CADDR)) hw_type = HW_TYPE_AC;
+  if (1) {hw_type = HW_TYPE_AC;
+  Serial.println("");
+  Serial.println("hw_type = HW_TYPE_AC");}
 	else if(detect_i2c(DCDR_I2CADDR)) hw_type = HW_TYPE_DC;
 	else if(detect_i2c(LADR_I2CADDR)) hw_type = HW_TYPE_LATCH;
 
 	/* detect hardware revision type */
-	if(detect_i2c(MAIN_I2CADDR)) {	// check if main PCF8574 exists
+	//if(detect_i2c(MAIN_I2CADDR)) {	// check if main PCF8574 exists
+  if(1) {  // check if main PCF8574 exists
+    Serial.println("revision 0 pins assigned");
 		/* assign revision 0 pins */
 		PIN_BUTTON_1 = V0_PIN_BUTTON_1;
 		PIN_BUTTON_2 = V0_PIN_BUTTON_2;
@@ -1502,6 +1508,7 @@ void OpenSprinkler::sensor_resetall() {
 	sensor2_on_timer = 0;
 	sensor2_off_timer = 0;
 	sensor2_active_lasttime = 0;
+  hunter_p_active_lasttime = 0; // 3B
 	old_status.sensor1_active = status.sensor1_active = 0;
 	old_status.sensor2_active = status.sensor2_active = 0;
 }
@@ -1527,7 +1534,8 @@ uint16_t OpenSprinkler::read_current() {
 			#endif
 		} else if (hw_type == HW_TYPE_AC) {
 			#if defined(ESP8266)
-			scale = 3.45;
+			//scale = 3.45;
+      scale = 3.242; // 3B => show mV on A0 from hunter P pin
 			#else
 			scale = 11.39;
 			#endif
@@ -3085,6 +3093,12 @@ void OpenSprinkler::lcd_set_brightness(unsigned char value) {
 void OpenSprinkler::flash_screen() {
 	lcd.setCursor(0, -1);
 	lcd.print(F(" OpenSprinkler"));
+	lcd.drawXbm(34, 24, WiFi_Logo_width, WiFi_Logo_height, (const unsigned char*) WiFi_Logo_image);
+	lcd.setCursor(0, 2);	
+	lcd.display();
+	delay(1500);
+	lcd.setCursor(0, -1);
+	lcd.print(F(" X-Core Hunter"));
 	lcd.drawXbm(34, 24, WiFi_Logo_width, WiFi_Logo_height, (const unsigned char*) WiFi_Logo_image);
 	lcd.setCursor(0, 2);
 	lcd.display();
