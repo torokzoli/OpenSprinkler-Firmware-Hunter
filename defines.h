@@ -413,12 +413,19 @@ enum {
 
 	/* OS32 pin defines */
 	// pins on PCA9555A IO expander have pin numbers IOEXP_PIN+i
-	#define V2_IO_CONFIG         0x1000 // config bits
-	#define V2_IO_OUTPUT         0x1E00 // output bits
-	#define V2_PIN_BUTTON_1      2 // button 1
-	#define V2_PIN_BUTTON_2      0 // button 2
-	#define V2_PIN_BUTTON_3      IOEXP_PIN+12 // button 3
-	#define V2_PIN_RFTX          15
+	// Hunter mod using ESP8266 (Detect as OS3.2)
+	// GPIO 12, 13, 14, 16 reserved for SPI ethernet
+
+	#define FORCE_OS3V2			 1 // 0 to allow auto-detect, 1 to force 3.2 HW
+	#define ENABLE_ISENSE		 0
+	#define SHOW_SENSOR2		 0 // 1 to enable sensor 2 in UI (can use GPIO10)
+
+	#define V2_IO_CONFIG         0x1F00 // config bits
+	#define V2_IO_OUTPUT         0x1F00 // output bits
+	#define V2_PIN_BUTTON_1      15 // button 1 disabled
+	#define V2_PIN_BUTTON_2      255 // button 2 disabled
+	#define V2_PIN_BUTTON_3      255 // button 3 disabled
+	#define V2_PIN_RFTX          255 // RF transmitter pin disabled
 	#define V2_PIN_BOOST         IOEXP_PIN+13
 	#define V2_PIN_BOOST_EN      IOEXP_PIN+14
 	#define V2_PIN_LATCH_COMA    IOEXP_PIN+8  // latch COM+ (anode)
@@ -428,9 +435,12 @@ enum {
 	#define V2_PIN_LATCH_COMK    IOEXP_PIN+15 // latch COM- (cathode)
 	#define V2_PIN_SENSOR1       3  // sensor 1
 	#define V2_PIN_SENSOR2       10 // sensor 2
+	#define V2_PIN_LATCH_COM     IOEXP_PIN+15
+	#define V2_PIN_SENSOR1       16  // sensor 1 (HUNTER D0)
+	#define V2_PIN_SENSOR2       255 // sensor 2
 
-	#define USE_DISPLAY
-	#define USE_SSD1306
+	// #define USE_DISPLAY
+	// #define USE_SSD1306
 
 #elif defined(OSPI) // for OSPi
 

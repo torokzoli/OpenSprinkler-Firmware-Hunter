@@ -31,6 +31,7 @@
 #include "mqtt.h"
 #include "main.h"
 #include "notifier.h"
+#include "hunter.h"
 
 #if defined(ARDUINO)
 #include <Arduino.h>
@@ -68,18 +69,24 @@
 #endif
 
 void manual_start_program(unsigned char, unsigned char);
+void reset_all_stations();
+void reset_all_stations_immediate();
+void push_message(uint8_t type, uint32_t lval=0, float fval=0.f);
+void remote_http_callback(char*);
 
 // Small variations have been added to the timing values below
 // to minimize conflicting events
-#define NTP_SYNC_INTERVAL       86413L  // NTP sync interval (in seconds)
-#define CHECK_NETWORK_INTERVAL  601     // Network checking timeout (in seconds)
-#define CHECK_WEATHER_TIMEOUT   21613L  // Weather check interval (in seconds)
-#define CHECK_WEATHER_SUCCESS_TIMEOUT 86400L // Weather check success interval (in seconds)
-#define LCD_BACKLIGHT_TIMEOUT     15    // LCD backlight timeout (in seconds))
-#define PING_TIMEOUT              200   // Ping test timeout (in ms)
+#define NTP_SYNC_INTERVAL				1440L 	// NYP sync interval, every 30 mins, expressed in seconds
+#define RTC_SYNC_INTERVAL				3607		// RTC sync interval, 3600 secs
+#define CHECK_NETWORK_INTERVAL	601			// Network checking timeout, 10 minutes
+#define CHECK_WEATHER_TIMEOUT		7207L		// Weather check interval: 2 hours
+#define CHECK_WEATHER_SUCCESS_TIMEOUT 86400L // Weather check success interval: 24 hrs
+#define LCD_BACKLIGHT_TIMEOUT		15			// LCD backlight timeout: 15 secs
+#define PING_TIMEOUT						200			// Ping test timeout: 200 ms
 #define UI_STATE_MACHINE_INTERVAL 50    // how often does ui_state_machine run (in ms)
 #define CLIENT_READ_TIMEOUT       5     // client read timeout (in seconds)
 #define DHCP_CHECKLEASE_INTERVAL  3600L // DHCP check lease interval (in seconds)
+
 // Define buffers: need them to be sufficiently large to cover string option reading
 char ether_buffer[ETHER_BUFFER_SIZE*2]; // ethernet buffer, make it twice as large to allow overflow
 char tmp_buffer[TMP_BUFFER_SIZE*2]; // scratch buffer, make it twice as large to allow overflow
@@ -467,9 +474,14 @@ void do_setup() {
 
 void turn_on_station(unsigned char sid, ulong duration);
 static void check_network();
+void write_log(uint8_t type, ulong curr_time);
+void schedule_all_stations(ulong curr_time);
+void turn_off_station(uint8_t sid, ulong curr_time);
+void process_dynamic_events(ulong curr_time);
 void check_weather();
 static bool process_special_program_command(const char*, uint32_t curr_time);
 static void perform_ntp_sync();
+void delete_log(char *name);
 
 #if defined(ESP8266)
 bool delete_log_oldest();
@@ -740,8 +752,27 @@ void do_loop()
 				notif.add(NOTIFY_SENSOR2, LOGDATA_SENSOR2, 0);
 			}
 		}
-		os.old_status.sensor2_active = os.status.sensor2_active;
+		os.old_status.sensor2_active = os.status.sensor2_active;			
 
+    // ====== Check hunter_p sensor status ====== 3B
+    if (os.read_current() > 3000) {
+      os.status.hunter_p = 1;
+    } else {
+      os.status.hunter_p = 0;
+    }
+      if (os.old_status.hunter_p != os.status.hunter_p) {
+        if (curr_time>os.hunter_p_active_lasttime+5) {   // add a 5 second delay on status change
+          if (os.status.hunter_p) {
+            // hunter_p sensor on
+            os.hunter_p_active_lasttime = curr_time;
+          } else {
+            // hunter_p sensor off
+            os.hunter_p_active_lasttime = curr_time;
+            }
+        }
+        os.old_status.hunter_p = os.status.hunter_p;
+      }
+      
 		// ===== Check program switch status =====
 		unsigned char pswitch = os.detect_programswitch_status(curr_time);
 		if(pswitch > 0) {
@@ -887,6 +918,19 @@ void do_loop()
 							turn_off_station(sid, curr_time);
 						}
 					}
+					// if current station is not running, check if we should turn it on
+					if(!((bitvalue>>s)&1)) {
+						if (curr_time >= q->st && curr_time < q->st+q->dur) {
+
+							//turn_on_station(sid);
+							os.set_station_bit(sid, 1);
+              				HunterStart(sid+1,round((q->dur/60)+0.5)); // Starts X-Core Hunter zone for 'dur' minutes +1
+
+							// RAH implementation of flow sensor
+							flow_start=0;
+
+						} //if curr_time > scheduled_start_time
+					} // if current station is not running
 				}//end_s
 			}//end_bid
 
@@ -1014,7 +1058,23 @@ void do_loop()
 
 #if defined(USE_DISPLAY)
 		// process LCD display
-		if (!ui_state) { os.lcd_print_screen(ui_anim_chars[(unsigned long)curr_time%3]); }
+		if (!ui_state) {
+			os.lcd_print_screen(ui_anim_chars[(unsigned long)curr_time%3]);
+			#if defined(ESP8266)
+				if(os.get_wifi_mode()==WIFI_MODE_STA && WiFi.status()==WL_CONNECTED && WiFi.localIP()) {
+					os.lcd.setCursor(0, 2);
+					os.lcd.clear(2, 2);
+					if(os.status.program_busy) {
+						//os.lcd.print(F("curr: "));
+						os.lcd.print(F("A0: ")); // 3B => show mV on A0 from hunter P pin
+						uint16_t curr = os.read_current();
+						os.lcd.print(curr);
+						//os.lcd.print(F(" mA"));
+						os.lcd.print(F(" mV")); // 3B => show mV on A0 from hunter P pin
+					}
+				}
+			#endif			
+		}
 #endif
 
 		// handle reboot request
@@ -1184,6 +1244,8 @@ void handle_shift_remaining_stations(RuntimeQueueStruct* q, unsigned char gid, t
  * the station should be removed from the queue
  */
 void turn_off_station(unsigned char sid, time_os_t curr_time, unsigned char shift) {
+	os.set_station_bit(sid, 0);
+	HunterStop(sid+1); // Stops X-Core Hunter zones
 
 	unsigned char qid = pd.station_qid[sid];
 	// ignore request if trying to turn off a zone that's not even in the queue
@@ -1358,6 +1420,9 @@ void schedule_all_stations(time_os_t curr_time) {
 		if(q->st) continue; // if this queue element has already been scheduled, skip
 		if(!q->dur) continue; // if the element has been marked to reset, skip
 		gid = os.get_station_gid(q->sid);
+		// uint8_t sid=q->sid;
+		// uint8_t bid=sid>>3;
+		// uint8_t s=sid&0x07;
 
 		// use sequential scheduling per sequential group
 		// apply station delay time
