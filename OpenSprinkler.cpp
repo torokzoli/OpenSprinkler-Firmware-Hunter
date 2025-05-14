@@ -634,15 +634,17 @@ unsigned char OpenSprinkler::start_ether() {
 	lcd_print_line_clear_pgm(PSTR("Start wired link"), 1);
 	lcd_print_line_clear_pgm(eth.isW5500 ? PSTR("  [w5500]    ") : PSTR(" [enc28j60]  "), 2);
 	
-	ulong timeout = millis()+60000; // 60 seconds time out
-	unsigned char timecount = 1;
-	while (!eth.connected() && millis()<timeout) {
-		DEBUG_PRINT(".");
-		lcd.setCursor(13, 2);
-		lcd.print(timecount);
-		delay(1000);
-		timecount++;
-	}
+	#if defined(USE_DISPLAY)
+		ulong timeout = millis()+60000; // 60 seconds time out
+		unsigned char timecount = 1;
+		while (!eth.connected() && millis()<timeout) {
+			DEBUG_PRINT(".");
+			lcd.setCursor(13, 2);
+			lcd.print(timecount);
+			delay(1000);
+			timecount++;
+		}
+	#endif
 	lcd_print_line_clear_pgm(PSTR(""), 2);
 	if(eth.connected()) {
 		// if wired connection is successful at this point, copy the network ips to config
@@ -1078,18 +1080,19 @@ pinModeExt(PIN_BUTTON_3, INPUT_PULLUP);
 
 #if defined(ARDUINO)
 	#if defined(ESP8266)
-		lcd.setCursor(0,0);
-		lcd.print(F("Init file system"));
-		lcd.setCursor(0,1);
-		if(!LittleFS.begin()) {
-			// !!! flash init failed, stall as we cannot proceed
-			lcd.setCursor(0, 0);
-			lcd_print_pgm(PSTR("Error Code: 0x2D"));
-			delay(5000);
-		}
+		#if defined(USE_DISPLAY)
+			lcd.setCursor(0,0);
+			lcd.print(F("Init file system"));
+			lcd.setCursor(0,1);
+			if(!LittleFS.begin()) {
+				// !!! flash init failed, stall as we cannot proceed
+				lcd.setCursor(0, 0);
+				lcd_print_pgm(PSTR("Error Code: 0x2D"));
+				delay(5000);
+			}
 
-		state = OS_STATE_INITIAL;
-
+			state = OS_STATE_INITIAL;
+		#endif
 	#else
 
 		// set sd cs pin high to release SD
@@ -2322,104 +2325,106 @@ void OpenSprinkler::options_setup() {
 	}
 
 #if defined(ARDUINO)	// handle AVR buttons
-	unsigned char button = button_read(BUTTON_WAIT_NONE);
+	#if defined(USE_DISPLAY)
+		unsigned char button = button_read(BUTTON_WAIT_NONE);
 
-	switch(button & BUTTON_MASK) {
+		switch(button & BUTTON_MASK) {
 
-	case BUTTON_1:
-		// if BUTTON_1 is pressed during startup, go to 'reset all options'
-		ui_set_options(IOPT_RESET);
-		if (iopts[IOPT_RESET]) {
-			pre_factory_reset();
-			reboot_dev(REBOOT_CAUSE_RESET);
-		}
-		break;
+		case BUTTON_1:
+			// if BUTTON_1 is pressed during startup, go to 'reset all options'
+			ui_set_options(IOPT_RESET);
+			if (iopts[IOPT_RESET]) {
+				pre_factory_reset();
+				reboot_dev(REBOOT_CAUSE_RESET);
+			}
+			break;
 
-	case BUTTON_2:
-	#if defined(ESP8266)
-		// if BUTTON_2 is pressed during startup, go to Test OS mode
-		// only available for OS 3.0
-		lcd_print_line_clear_pgm(PSTR("===Test Mode==="), 0);
-		lcd_print_line_clear_pgm(PSTR("  B3:proceed"), 1);
-		do {
-			button = button_read(BUTTON_WAIT_NONE);
-		} while(!((button&BUTTON_MASK)==BUTTON_3 && (button&BUTTON_FLAG_DOWN)));
-		// set test mode parameters
-
-		//iopts[IOPT_WIFI_MODE] = WIFI_MODE_STA;
-		wifi_testmode = 1;
-		#if defined(TESTMODE_SSID)
-		wifi_ssid = TESTMODE_SSID;
-		wifi_pass = TESTMODE_PASS;
-		#else
-		wifi_ssid = "ostest";
-		wifi_pass = "opendoor";
-		#endif
-		button = 0;
-	#endif
-
-		break;
-
-	case BUTTON_3:
-		// if BUTTON_3 is pressed during startup, enter Setup option mode
-		lcd_print_line_clear_pgm(PSTR("==Set Options=="), 0);
-		delay(DISPLAY_MSG_MS);
-		lcd_print_line_clear_pgm(PSTR("B1/B2:+/-, B3:->"), 0);
-		lcd_print_line_clear_pgm(PSTR("Hold B3 to save"), 1);
-		do {
-			button = button_read(BUTTON_WAIT_NONE);
-		} while (!(button & BUTTON_FLAG_DOWN));
-		lcd.clear();
-		ui_set_options(0);
-		if (iopts[IOPT_RESET]) {
-			pre_factory_reset();
-			reboot_dev(REBOOT_CAUSE_RESET);
-		}
-		break;
-	}
-
-	// turn on LCD backlight and contrast
-	lcd_set_brightness();
-	lcd_set_contrast();
-
-	if (!button) {
-		// flash screen
-		lcd_print_line_clear_pgm(PSTR(" OpenSprinkler"),0);
-		lcd.setCursor((hw_type==HW_TYPE_LATCH)?2:4, 1);
-		lcd_print_pgm(PSTR("v"));
-		unsigned char hwv = iopts[IOPT_HW_VERSION];
-		lcd.print((char)('0'+(hwv/10)));
-		lcd.print('.');
+		case BUTTON_2:
 		#if defined(ESP8266)
-		lcd.print(hw_rev);
-		#else
-		lcd.print((char)('0'+(hwv%10)));
+			// if BUTTON_2 is pressed during startup, go to Test OS mode
+			// only available for OS 3.0
+			lcd_print_line_clear_pgm(PSTR("===Test Mode==="), 0);
+			lcd_print_line_clear_pgm(PSTR("  B3:proceed"), 1);
+			do {
+				button = button_read(BUTTON_WAIT_NONE);
+			} while(!((button&BUTTON_MASK)==BUTTON_3 && (button&BUTTON_FLAG_DOWN)));
+			// set test mode parameters
+
+			//iopts[IOPT_WIFI_MODE] = WIFI_MODE_STA;
+			wifi_testmode = 1;
+			#if defined(TESTMODE_SSID)
+			wifi_ssid = TESTMODE_SSID;
+			wifi_pass = TESTMODE_PASS;
+			#else
+			wifi_ssid = "ostest";
+			wifi_pass = "opendoor";
+			#endif
+			button = 0;
 		#endif
-		switch(hw_type) {
-		case HW_TYPE_DC:
-			lcd_print_pgm(PSTR(" DC"));
+
 			break;
-		case HW_TYPE_LATCH:
-			lcd_print_pgm(PSTR(" LATCH"));
+
+		case BUTTON_3:
+			// if BUTTON_3 is pressed during startup, enter Setup option mode
+			lcd_print_line_clear_pgm(PSTR("==Set Options=="), 0);
+			delay(DISPLAY_MSG_MS);
+			lcd_print_line_clear_pgm(PSTR("B1/B2:+/-, B3:->"), 0);
+			lcd_print_line_clear_pgm(PSTR("Hold B3 to save"), 1);
+			do {
+				button = button_read(BUTTON_WAIT_NONE);
+			} while (!(button & BUTTON_FLAG_DOWN));
+			lcd.clear();
+			ui_set_options(0);
+			if (iopts[IOPT_RESET]) {
+				pre_factory_reset();
+				reboot_dev(REBOOT_CAUSE_RESET);
+			}
 			break;
-		default:
-			lcd_print_pgm(PSTR(" AC"));
 		}
-		delay(1500);
-		#if defined(ARDUINO)
-		lcd.setCursor(2, 1);
-		lcd_print_pgm(PSTR("FW "));
-		lcd.print((char)('0'+(OS_FW_VERSION/100)));
-		lcd.print('.');
-		lcd.print((char)('0'+((OS_FW_VERSION/10)%10)));
-		lcd.print('.');
-		lcd.print((char)('0'+(OS_FW_VERSION%10)));
-		lcd.print('(');
-		lcd.print(OS_FW_MINOR);
-		lcd.print(')');
-		delay(1000);
-		#endif
-	}
+
+		// turn on LCD backlight and contrast
+		lcd_set_brightness();
+		lcd_set_contrast();
+
+		if (!button) {
+			// flash screen
+			lcd_print_line_clear_pgm(PSTR(" OpenSprinkler"),0);
+			lcd.setCursor((hw_type==HW_TYPE_LATCH)?2:4, 1);
+			lcd_print_pgm(PSTR("v"));
+			unsigned char hwv = iopts[IOPT_HW_VERSION];
+			lcd.print((char)('0'+(hwv/10)));
+			lcd.print('.');
+			#if defined(ESP8266)
+			lcd.print(hw_rev);
+			#else
+			lcd.print((char)('0'+(hwv%10)));
+			#endif
+			switch(hw_type) {
+			case HW_TYPE_DC:
+				lcd_print_pgm(PSTR(" DC"));
+				break;
+			case HW_TYPE_LATCH:
+				lcd_print_pgm(PSTR(" LATCH"));
+				break;
+			default:
+				lcd_print_pgm(PSTR(" AC"));
+			}
+			delay(1500);
+			#if defined(ARDUINO)
+			lcd.setCursor(2, 1);
+			lcd_print_pgm(PSTR("FW "));
+			lcd.print((char)('0'+(OS_FW_VERSION/100)));
+			lcd.print('.');
+			lcd.print((char)('0'+((OS_FW_VERSION/10)%10)));
+			lcd.print('.');
+			lcd.print((char)('0'+(OS_FW_VERSION%10)));
+			lcd.print('(');
+			lcd.print(OS_FW_MINOR);
+			lcd.print(')');
+			delay(1000);
+			#endif
+		}
+	#endif	
 #endif
 }
 

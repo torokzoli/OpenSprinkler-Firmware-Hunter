@@ -60,13 +60,13 @@
 	OTF::OpenThingsFramework *otf = NULL;
 #endif
 
-#if defined(USE_SSD1306)
+// #if defined(USE_SSD1306)
 	#if defined(ESP8266)
 	static uint16_t led_blink_ms = LED_FAST_BLINK;
 	#else
 	static uint16_t led_blink_ms = 0;
 	#endif
-#endif
+// #endif
 
 void manual_start_program(unsigned char, unsigned char);
 void reset_all_stations();
@@ -385,7 +385,9 @@ void do_setup() {
 
 	// set time using RTC if it exists
 	if(RTC.exists())	setTime(RTC.get());
-	os.lcd_print_time(os.now_tz());  // display time to LCD
+	#if defined(USE_DISPLAY)
+		os.lcd_print_time(os.now_tz());  // display time to LCD
+	#endif
 	os.powerup_lasttime = os.now_tz();
 
 #if defined(OS_AVR)
@@ -476,7 +478,7 @@ void turn_on_station(unsigned char sid, ulong duration);
 static void check_network();
 void write_log(uint8_t type, ulong curr_time);
 void schedule_all_stations(ulong curr_time);
-void turn_off_station(uint8_t sid, ulong curr_time);
+//void turn_off_station(uint8_t sid, ulong curr_time);
 void process_dynamic_events(ulong curr_time);
 void check_weather();
 static bool process_special_program_command(const char*, uint32_t curr_time);
@@ -531,8 +533,10 @@ void do_loop()
 	case OS_STATE_INITIAL:
 		if(useEth) {
 			led_blink_ms = 0;
-			os.set_screen_led(LOW);
-			os.lcd.clear();
+			#if defined(USE_DISPLAY)
+				os.set_screen_led(LOW);
+				os.lcd.clear();
+			#endif
 			os.save_wifi_ip();
 			start_server_client();
 			os.state = OS_STATE_CONNECTED;
@@ -553,10 +557,12 @@ void do_loop()
 			os.config_ip();
 			os.state = OS_STATE_CONNECTING;
 			connecting_timeout = millis() + 120000L;
-			os.lcd.setCursor(0, -1);
-			os.lcd.print(F("Connecting to..."));
-			os.lcd.setCursor(0, 2);
-			os.lcd.print(os.wifi_ssid);
+			#if defined(USE_DISPLAY)
+				os.lcd.setCursor(0, -1);
+				os.lcd.print(F("Connecting to..."));
+				os.lcd.setCursor(0, 2);
+				os.lcd.print(os.wifi_ssid);
+			#endif
 		}
 		break;
 
@@ -574,8 +580,10 @@ void do_loop()
 	case OS_STATE_CONNECTING:
 		if(WiFi.status() == WL_CONNECTED) {
 			led_blink_ms = 0;
-			os.set_screen_led(LOW);
-			os.lcd.clear();
+			#if defined(USE_DISPLAY)
+				os.set_screen_led(LOW);
+				os.lcd.clear();
+			#endif
 			os.save_wifi_ip();
 			start_server_client();
 			os.state = OS_STATE_CONNECTED;
@@ -665,7 +673,9 @@ void do_loop()
 
 	#endif
 
-	ui_state_machine();
+	#if defined(USE_DISPLAY)
+		ui_state_machine();
+	#endif
 
 #else // Process Ethernet packets for RPI/LINUX
 	if(otf) otf->loop();
@@ -1190,9 +1200,11 @@ void check_weather() {
 	} else if (!os.checkwt_lasttime || (ntz > os.checkwt_lasttime + CHECK_WEATHER_TIMEOUT)) {
 		os.checkwt_lasttime = ntz;
 		#if defined(ARDUINO)
-		if (!ui_state) {
-			os.lcd_print_line_clear_pgm(PSTR("Check Weather..."),1);
-		}
+		#if defined(USE_DISPLAY)
+			if (!ui_state) {
+				os.lcd_print_line_clear_pgm(PSTR("Check Weather..."),1);
+			}
+			#endif
 		#endif
 		GetWeather();
 	}
@@ -1826,9 +1838,11 @@ static void perform_ntp_sync() {
 
 	if (os.status.req_ntpsync) {
 		os.status.req_ntpsync = 0;
-		if (!ui_state) {
-			os.lcd_print_line_clear_pgm(PSTR("NTP Syncing..."),1);
-		}
+		#if defined(USE_DISPLAY)
+			if (!ui_state) {
+				os.lcd_print_line_clear_pgm(PSTR("NTP Syncing..."),1);
+			}
+		#endif
 		DEBUG_PRINTLN(F("NTP Syncing..."));
 		static ulong last_ntp_result = 0;
 		ulong t = getNtpTime();
